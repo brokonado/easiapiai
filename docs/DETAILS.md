@@ -26,11 +26,26 @@ Token meaning, the same for every source: `input_tokens` is every input token th
 (uncached input plus cache writes); `cached_input_tokens` is cache reads. Local models (Ollama, LM Studio) and
 subscriptions that are not API sellers are skipped.
 
+**Speed.** A row can also carry `tps_median`, the median output speed of its replies in tokens per second, and
+`tps_n`, the number of replies that median is over. A reply's speed is its output tokens (reasoning included)
+divided by the time from the request to the end of the reply, so the wait for the first token is part of it. A
+reply counts only with at least 50 output tokens and at least 0.5 seconds, and a value above 5000 tokens per second
+is dropped as a broken timestamp. A row has both fields or neither. When two tools report the same seller, model and
+month, the row gets the mean of their two medians weighted by their reply counts (an approximation of the median of
+all those replies) and the sum of the counts.
+
+| Source | How speed is measured |
+|---|---|
+| Claude Code | from the timestamp of the line the reply answers (your prompt or the tool results, or a reminder line that Claude Code adds right before sending) to the timestamp of the reply's last line. A request that Claude Code retried after an API error includes the wait. |
+| opencode, Kilo Code | from the message's `time.created` to its `time.completed`, only for replies that ended without calling tools (`finish` is `stop`) and without an error. For a reply that calls tools, opencode sets `time.completed` after the tools have run. `time.created` is set shortly before the request (opencode first snapshots the project and builds the prompt), so these figures come out somewhat slower than the provider's own. |
+| Cline | not measured: its task files record only when a request started, and its newer session files only when the reply ended |
+| Codex, OpenRouter report | not measured |
+
 **Sent** to `https://easiapiai.com/api/usage/share`: per row the seller, the provider that served it (for routers),
-the model, the month, token, request and error counts and, if a source records it, the cost; the source type, the
-tool name and version, and a random contributor id kept in `~/.config/easiapiai/contributor_id` (so sending again
-replaces your earlier numbers instead of adding to them). **Never sent:** prompts, replies, code, file or project
-names, keys.
+the model, the month, token, request and error counts, the median speed with its reply count (when the source
+measures it) and, if a source records it, the cost; the source type, the tool name and version, and a random
+contributor id kept in `~/.config/easiapiai/contributor_id` (so sending again replaces your earlier numbers instead
+of adding to them). **Never sent:** prompts, replies, code, file or project names, keys.
 
 **Automatic sharing (Claude Code plugin).** The plugin has two `SessionStart` hooks. The first asks once (at most 3
 times, a few days apart, if you don't answer) whether to share automatically; your answer is kept in
@@ -39,7 +54,9 @@ background at most once every 7 days. Nothing is printed, nothing blocks your se
 nothing.
 
 **Published:** rounded totals per seller, only once 3 different people have shared that seller, at
-https://easiapiai.com/share. Details: https://easiapiai.com/privacy.html#usage
+https://easiapiai.com/share. Speed is shown per seller and per model as the median of people's medians, weighted by
+their reply counts and rounded to a whole number, once 3 different people have sent speed for it. Details:
+https://easiapiai.com/privacy.html#usage
 
 ## `easiapiai bill`: price your real usage
 

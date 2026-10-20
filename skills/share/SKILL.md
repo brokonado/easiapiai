@@ -1,14 +1,14 @@
 ---
 name: share
-description: Report the user's LLM API spend to easiapiai.com as numbers only (seller, model, month, token, request and error counts, optionally what they paid), never keys or prompts, so API sellers can be held to account. Also turns automatic weekly reporting on or off. Use when the user asks to report, share or contribute their usage or spend, to stop or start automatic reporting, or runs /easiapiai:share.
+description: "See how LLM API sellers actually perform: add your speed, failed requests and token counts per seller (never your key). Reports the user's LLM API usage to easiapiai.com as numbers only (seller, model, month, token, request and error counts, median speed, optionally what they paid), never keys or prompts. Also turns automatic weekly reporting on or off. Use when the user asks to report, share or contribute their usage or spend, to stop or start automatic reporting, or runs /easiapiai:share."
 ---
 
-# Report my spend
+# Report my usage
 
-easiapiai keeps LLM API sellers accountable by pooling usage numbers from many people: which sellers and models they
-use, how many tokens, requests and errors, what they paid. Nothing is shown until 3 different people have reported
-the same seller. Only numbers are
-sent: never a key, a prompt, a reply, code, a file name or a project name.
+See how LLM API sellers actually perform: add your speed, failed requests and token counts per seller (never your
+key). easiapiai pools usage numbers from many people: which sellers and models they use, how many tokens, requests
+and errors, how fast the replies came, what they paid. Nothing is shown until 3 different people have reported the
+same seller. Only numbers are sent: never a key, a prompt, a reply, code, a file name or a project name.
 
 ## With Node.js (the usual way)
 

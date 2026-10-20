@@ -58,6 +58,16 @@
 // error_retry, plus each api_req_failed not right after a `failed: true` error_retry; classified 429 rate_limit,
 // 529 overloaded, 5xx server, 401/403 auth, otherwise (or no status) other.
 // SDK sessions keep no record of failed requests on disk, so they give no errors.
+//
+// No speed (tps_median / tps_n) from Cline: neither format records both ends of a request. Classic tasks keep an
+// early START only: api_req_started is written as a placeholder before Cline gathers the environment details for
+// the request (v3.89.2 core/task/index.ts:2620-2627, "can take a few seconds"), its ts is not changed when the
+// tokens are filled in at the end, the old api_req_finished message is no longer written (index.ts:1201), and the
+// next messages' ts are the first streamed chunk or come after tools ran. SDK sessions keep the END only: an assistant
+// message's ts is createdAt, set when the streamed reply has been assembled (sdk/packages/agents/src/agent-runtime.ts:
+// 361-373, 2066; core/src/runtime/config/agent-message-codec.ts:133); the request's own start time is kept in memory
+// for telemetry (agent-runtime.ts:1685, 1777) and not saved, and the previous message's ts is earlier by hooks,
+// compaction and request building.
 import fs from "node:fs";
 import path from "node:path";
 

@@ -13,7 +13,8 @@
 //   name  = the source as shown to the user ("Claude Code")
 //   found = whether the source exists on this computer
 //   rows  = [{seller, served_by?, model, month, input_tokens, output_tokens, cached_input_tokens?, requests?,
-//             errors? {rate_limit, overloaded, server, auth, other}, cost_usd?, source? ("logs" when missing)}]
+//             errors? {rate_limit, overloaded, server, auth, other}, cost_usd?, source? ("logs" when missing),
+//             tps_median?, tps_n? (speed: both or neither, see speed.mjs)}]
 //   note  = one short line for the user, or null
 // A reader reads only numbers, model and provider names and timestamps: never prompts, replies, code or file names,
 // and never keeps file contents. It skips silently when its source is absent.
@@ -24,6 +25,7 @@ import { compareStr, isDict } from "../py.mjs";
 import * as claudeCode from "./claude_code.mjs";
 import * as codex from "./codex.mjs";
 import * as openrouter from "./openrouter.mjs";
+import { combine, validSpeed } from "./speed.mjs";
 
 const ERRORS = ["rate_limit", "overloaded", "server", "auth", "other"];
 const SOURCES = new Set(["logs", "usage_api", "export", "manual"]);
@@ -82,6 +84,11 @@ function clean(row, months) {
   if (out.source === "usage_api" && typeof row.cost_usd === "number" && Number.isFinite(row.cost_usd) && row.cost_usd >= 0) {
     out.cost_usd = row.cost_usd;
   }
+  // speed only as a valid pair (0 < tps_median <= 5000, 1 <= tps_n <= 10^9); otherwise neither is sent
+  if (validSpeed(row.tps_median, row.tps_n)) {
+    out.tps_median = row.tps_median;
+    out.tps_n = row.tps_n;
+  }
   if (!out.input_tokens && !out.output_tokens && !out.requests && !out.errors) return null;
   return out;
 }
@@ -97,6 +104,12 @@ function add(a, b) {
   a.cost_usd = a.cost_usd !== undefined && b.cost_usd !== undefined ? a.cost_usd + b.cost_usd : undefined;
   if (a.cost_usd === undefined) delete a.cost_usd;
   if (a.source !== b.source) a.source = "logs";
+  // speed: the two medians averaged, weighted by their reply counts (an approximation of the median of all the
+  // replies, which are no longer at hand: see speed.mjs combine), and the counts added
+  const speed = combine(a, b);
+  delete a.tps_median;
+  delete a.tps_n;
+  if (speed) Object.assign(a, speed);
   return a;
 }
 

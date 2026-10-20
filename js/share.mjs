@@ -1,6 +1,7 @@
 // `easiapiai share`, `easiapiai sharing on|off|status`, and the two hooks of the Claude Code plugin
-// (`hook session-start`, `hook send`). What is sent: per seller, model and month, token, request and error counts.
-// Never prompts, replies, code, file names, project names or keys.
+// (`hook session-start`, `hook send`). What is sent: per seller, model and month, token, request and error counts,
+// and the median speed (output tokens per second) where the source records it. Never prompts, replies, code, file
+// names, project names or keys.
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -18,10 +19,10 @@ const ASK_EVERY = 3 * 86400000;
 const ASK_TIMES = 3;
 
 const QUESTION = "easiapiai plugin: the user has not decided about usage reporting yet. Ask them once, briefly, at the "
-  + "start of your first reply (or at the end if they asked for urgent work): \"easiapiai keeps LLM API sellers "
-  + "accountable by putting what people spend with each one in one public place. It can report yours automatically, "
-  + "about once a week: token and error counts per seller and month, never your key, prompts or code. Report "
-  + "automatically? (yes/no)\". If they say yes, "
+  + "start of your first reply (or at the end if they asked for urgent work): \"easiapiai shows how LLM API sellers "
+  + "actually perform: speed, failed requests and real cost, from people's own usage. It can add yours "
+  + "automatically, about once a week: token, error and speed numbers per seller and month, never your key, prompts "
+  + "or code. Add yours automatically? (yes/no)\". If they say yes, "
   + "run `<CMD> sharing on`; if no, run `<CMD> sharing off`. Then do not mention it again.";
 
 function print(s = "") {
@@ -61,6 +62,12 @@ function printSources(sources) {
   }
 }
 
+function hasSpeed(rows) {
+  return rows.some((r) => typeof r.tps_median === "number");
+}
+
+// The rows as a table; the tok/s column (median output tokens per second) only when some row has it. The total line
+// leaves it empty: a median across different sellers and models means nothing.
 export function printTable(rows) {
   const total = { seller: "Total", model: "", month: "", input_tokens: 0, output_tokens: 0, cached_input_tokens: 0,
     requests: 0, errors: {} };
@@ -69,10 +76,12 @@ export function printTable(rows) {
     total.errors.all = (total.errors.all || 0) + errorCount(r);
   }
   const served = rows.some((r) => r.served_by);
+  const speed = hasSpeed(rows);
   const head = ["Seller", ...(served ? ["Served by"] : []), "Model", "Month", "Input", "Output", "Cached", "Requests",
-    "Errors"];
+    "Errors", ...(speed ? ["tok/s"] : [])];
   const line = (r) => [r.seller, ...(served ? [r.served_by ?? ""] : []), r.model, r.month, formatInt(r.input_tokens),
-    formatInt(r.output_tokens), formatInt(r.cached_input_tokens), formatInt(r.requests), formatInt(errorCount(r))];
+    formatInt(r.output_tokens), formatInt(r.cached_input_tokens), formatInt(r.requests), formatInt(errorCount(r)),
+    ...(speed ? [typeof r.tps_median === "number" ? r.tps_median.toFixed(1) : ""] : [])];
   const cells = [head, ...rows.map(line), line(total)];
   const left = served ? 4 : 3;
   const widths = head.map((_, i) => Math.max(...cells.map((c) => pyLen(c[i]))));
@@ -163,6 +172,9 @@ export async function cmdShare(args) {
   print();
   print("Usage to share, per seller, model and month (numbers only; errors are failed API requests):");
   printTable(rows);
+  if (hasSpeed(rows)) {
+    print("tok/s: the median output tokens per second of a reply, from the request to its last token.");
+  }
   print();
   if (args.dry_run) {
     print("Dry run: nothing was sent.");
@@ -203,8 +215,8 @@ export async function cmdSharing(args) {
     return 0;
   }
   print("Automatic reporting is on: while the easiapiai Claude Code plugin is installed, it sends your usage numbers "
-    + "about once a week (providers, models, token, request and error counts; never prompts, code, file names or "
-    + `keys). Stop any time with: ${cmd} sharing off`);
+    + "about once a week (providers, models, token, request and error counts, speed; never prompts, code, file names "
+    + `or keys). Stop any time with: ${cmd} sharing off`);
   if (args.no_send) return 0;
   const { rows } = await collect(context(lastMonths(13)));
   if (!rows.length) {

@@ -12,7 +12,7 @@
 //   kilo*.db) in the folder.
 // - table `message`, column `data` = JSON of SessionV1.Info (packages/core/src/session/sql.ts:68-80). Assistant
 //   messages (packages/schema/src/v1/session.ts:453-485): providerID, modelID, time{created,completed} (ms),
-//   cost, tokens{total?, input, output, reasoning, cache{read, write}}, error?{name, data{statusCode?, ...}}.
+//   cost, tokens{total?, input, output, reasoning, cache{read, write}}, error?{name, data{statusCode?, ...}}, finish?.
 //   One assistant message = one model call (packages/opencode/src/session/prompt.ts:1187 makes a new one per step).
 //   The SQL pulls only those fields with json_extract (plus the message id, to count a message once); the message
 //   text lives in other tables (`part`), which are never touched, and nothing else in `data` reaches JavaScript.
@@ -42,6 +42,24 @@
 // (UnknownError, ContextOverflowError, ContentFilterError, ...) other. A failed message with no tokens counts as an
 // error only, not as a request.
 //
+// Speed (tps_median, tps_n; rules in speed.mjs): per assistant message, output tokens (reasoning included, as above)
+// over time.completed - time.created. What the two times are (v1.19.3; Kilo 5cc65d1 does the same):
+// - time.created = Date.now() when the message object is made (packages/opencode/src/session/prompt.ts:1198),
+//   BEFORE the request: opencode then takes a git snapshot of the project (processor.ts:102), resolves the tools
+//   (MCP included) and builds the system prompt and messages (prompt.ts:1226-1270), and only then streams
+//   (prompt.ts:1272, processor.ts:654). So created is not the moment the request is sent: the gap is that local work.
+// - time.completed = Date.now() in the processor's cleanup, after the whole stream has been drained
+//   (processor.ts:609, run by Effect.ensuring at :690). The AI SDK runs the step's tool calls INSIDE that stream
+//   (llm.ts:276-277 "AI SDK owns provider execution and tool dispatch"; tool results arrive as stream events,
+//   llm/ai-sdk.ts:237), and the tools ask for permission there. So for a reply that called tools, completed comes
+//   after the tools ran and after any wait for the user to approve them: not the end of generation.
+// Hence only messages that finished with "stop" (no tool calls; `finish` = the step's finish reason,
+// processor.ts:457) and no error count. The duration still includes the local work before the request, a git
+// snapshot and diff after the reply (processor.ts:436, 472), and any retries of the same request after an API
+// error (processor.ts:674), so it reads somewhat slower than the provider alone. Messages without `finish` (opencode
+// before ~v1.1, which could also hold several steps in one message) are not timed. Known gap: a provider that
+// reports finish_reason "stop" alongside tool calls lets tool time in; the median limits the damage.
+//
 // Not read: the newer `session_message` table, which only the experimental V2 runner (packages/cli, "lildax")
 // writes; the opencode CLI records every model call in `message` (packages/core/src/session/projector.ts:260-272).
 //
@@ -51,6 +69,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { isDict } from "../py.mjs";
+import { replyTps, summarize } from "./speed.mjs";
 
 export const NAME = "opencode";
 
@@ -122,7 +141,7 @@ export class Totals {
     let g = this.groups.get(key);
     if (!g) {
       g = { seller, model, month, input: 0, output: 0, cached: 0, cachedKnown: false, requests: 0, cost: 0,
-        costMissing: false, errors: {} };
+        costMissing: false, errors: {}, speeds: [] };
       this.groups.set(key, g);
     }
     return g;
@@ -160,6 +179,11 @@ export class Totals {
     g.errors[kind] = (g.errors[kind] || 0) + 1;
   }
 
+  // one reply's output tokens per second (already filtered by speed.mjs replyTps)
+  addSpeed(seller, model, month, tps) {
+    this.group(seller, model, month).speeds.push(tps);
+  }
+
   rows() {
     const out = [];
     for (const g of this.groups.values()) {
@@ -172,6 +196,8 @@ export class Totals {
       }
       const counted = g.requests > 0 || g.input + g.output + g.cached > 0;
       if (counted && !g.costMissing) row.cost_usd = Math.round(g.cost * 1e6) / 1e6;
+      const speed = summarize(g.speeds);
+      if (speed) Object.assign(row, speed);
       out.push(row);
     }
     const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -270,6 +296,7 @@ export async function loadSqlite() {
 const J = (p) => `CASE WHEN json_valid(data) THEN json_extract(data, '${p}') END`;
 const QUERY = `SELECT id,
   ${J("$.providerID")} AS provider, ${J("$.modelID")} AS model, ${J("$.time.created")} AS created,
+  ${J("$.time.completed")} AS completed, ${J("$.finish")} AS finish,
   ${J("$.tokens.input")} AS input, ${J("$.tokens.output")} AS output, ${J("$.tokens.reasoning")} AS reasoning,
   ${J("$.tokens.cache.read")} AS cache_read, ${J("$.tokens.cache.write")} AS cache_write,
   ${J("$.tokens.total")} AS total, ${J("$.cost")} AS cost,
@@ -283,7 +310,7 @@ function dbRecords(DatabaseSync, file) {
   try {
     return db.prepare(QUERY).all().map((r) => ({
       id: typeof r.id === "string" ? r.id : null,
-      provider: r.provider, model: r.model, created: r.created,
+      provider: r.provider, model: r.model, created: r.created, completed: r.completed, finish: r.finish,
       input: r.input, output: r.output, reasoning: r.reasoning, cacheRead: r.cache_read, cacheWrite: r.cache_write,
       total: r.total, cost: r.cost,
       hasError: r.error_type !== null && r.error_type !== undefined && r.error_type !== "null",
@@ -309,7 +336,7 @@ function fileRecord(file) {
   const err = d.error;
   const data = isDict(err) && isDict(err.data) ? err.data : {};
   return {
-    provider: d.providerID, model: d.modelID, created: time.created,
+    provider: d.providerID, model: d.modelID, created: time.created, completed: time.completed, finish: d.finish,
     input: t.input, output: t.output, reasoning: t.reasoning, cacheRead: cache.read, cacheWrite: cache.write,
     total: t.total, cost: d.cost,
     hasError: err !== undefined && err !== null, errorName: isDict(err) ? err.name : null, status: data.statusCode,
@@ -326,6 +353,14 @@ export function errorKind(name, status) {
     return null;
   }
   return "other";
+}
+
+// a message's output tokens per second, or null when it is not timed (see the top of this file: only a reply that
+// finished with "stop", without an error, with both times recorded)
+export function messageTps(r) {
+  if (r.hasError || r.finish !== "stop") return null;
+  if (typeof r.created !== "number" || typeof r.completed !== "number") return null;
+  return replyTps(outputTokens(r), (r.completed - r.created) / 1000);
 }
 
 // output including reasoning, counting reasoning once (see the top of this file)
@@ -355,7 +390,11 @@ function count(totals, r) {
     cost: r.cost,
   };
   const kind = r.hasError ? errorKind(r.errorName, r.status) : null;
-  if (usage.input + usage.output + usage.cached > 0) totals.addRequest(seller, r.model, month, usage);
+  if (usage.input + usage.output + usage.cached > 0) {
+    totals.addRequest(seller, r.model, month, usage);
+    const tps = messageTps(r);
+    if (tps !== null) totals.addSpeed(seller, r.model, month, tps);
+  }
   if (kind) totals.addError(seller, r.model, month, kind);
 }
 

@@ -8,8 +8,9 @@
 // - input_tokens excludes cache reads and writes; thinking is part of output_tokens;
 // - the month is the line's timestamp in your local time zone.
 //
-// Only the model name, timestamp, ids and token counts of each line are used. Nothing here reads or keeps message
-// content beyond the line being parsed.
+// Only the model name, timestamp, ids and token counts of each line are used (and, for speed when sharing, the
+// type, uuid and parent uuid of the other lines). Nothing here reads or keeps message content beyond the line being
+// parsed.
 import fs from "node:fs";
 
 import { fileChunks, globTree, homeDir, joinPath, openFile, textLines } from "./files.mjs";
@@ -63,12 +64,44 @@ export function errorKind(error, status) {
   return "other";
 }
 
+// A line's timestamp in milliseconds since 1970, or NaN
+function msOf(d) {
+  const ts = get(d, "timestamp");
+  return typeof ts === "string" ? Date.parse(ts) : NaN;
+}
+
+// How many attachment lines (hook output, reminders, queued messages...) to follow up from a reply's parent line
+const MAX_HOPS = 20;
+
+// When the request behind a reply was sent, as well as the log shows it: the time of the line the reply's first
+// line names as its parent (the user's prompt or the tool results), or of the latest of the attachment lines
+// between them and that line (Claude Code adds them just before the request; a queued message carries the earlier
+// time it was typed); without a known parent, the previous user, attachment or system line of the same file.
+// `lines` = Map{uuid: [ms, is attachment, parent uuid]} of the file's non-assistant lines so far.
+function sentAt(lines, parent, previous) {
+  let p = typeof parent === "string" ? lines.get(parent) : undefined;
+  if (p === undefined) return previous;
+  let start = p[0];
+  for (let hops = 0; p[1] && hops < MAX_HOPS; hops++) {
+    p = typeof p[2] === "string" ? lines.get(p[2]) : undefined;
+    if (p === undefined) break;
+    if (p[0] > start) start = p[0];
+  }
+  return start;
+}
+
 // Map{key: [model, month, [input, output, cache_read, cache_write_5m, cache_write_1h]]}, one entry per API
 // response, keeping its line with the largest token total; plus the number of files read.
 // With `errors` (a Map), API error lines are added to it too: {line uuid: [model, month, kind]}, where the model is
 // that of the latest earlier assistant line in the same file (an error line itself names no real model); error
 // lines with no such line before them are left out.
-export function readLines(dirs, errors = null) {
+// With `timing` (a Map), each response with a message id gets {key: [sent ms, finished ms, output tokens]}: sent as
+// sentAt() finds it, finished = the timestamp of its last line with the largest output (Claude Code writes a line
+// per content block as the block completes; the last one closes the reply). A response found in several files keeps
+// the copy with the largest output, and of equal ones the copy that finished first (the original, whatever order the
+// files are read in). Every line is then parsed, not only assistant lines, for its uuid, parent and timestamp;
+// nothing else of it is kept.
+export function readLines(dirs, errors = null, timing = null) {
   const best = new Map();
   let files = 0;
   for (const root of dirs) {
@@ -81,9 +114,13 @@ export function readLines(dirs, errors = null) {
       }
       files += 1;
       let lastModel = null;
+      // this file's non-assistant lines: uuid -> [ms, attachment?, parent]
+      const lines = timing !== null ? new Map() : null;
+      const replies = timing !== null ? new Map() : null; // this file's responses: key -> [sent, finished, output]
+      let previous = NaN; // the latest user, attachment or system line of this file
       try {
         for (const line of textLines(fileChunks(fd))) {
-          if (!line.includes('"assistant"')) continue;
+          if (timing === null && !line.includes('"assistant"')) continue;
           let d;
           try {
             d = JSON.parse(line);
@@ -91,6 +128,17 @@ export function readLines(dirs, errors = null) {
             continue;
           }
           if (!isDict(d)) continue;
+          if (timing !== null && get(d, "type") !== "assistant") {
+            // (such a line has no usage and no error: the counting below would skip it anyway)
+            const type = get(d, "type");
+            const uuid = get(d, "uuid");
+            const ms = msOf(d);
+            if (Number.isFinite(ms)) {
+              if (typeof uuid === "string" && uuid) lines.set(uuid, [ms, type === "attachment", get(d, "parentUuid")]);
+              if (type === "user" || type === "attachment" || type === "system") previous = ms;
+            }
+            continue;
+          }
           let m = get(d, "type") === "assistant" ? get(d, "message") : null;
           m = isDict(m) ? m : null;
           const u = m ? get(m, "usage") : null;
@@ -127,9 +175,27 @@ export function readLines(dirs, errors = null) {
           const key = truthy(id) ? keyPart(id) + "|" + keyPart(get(d, "requestId")) : keyPart(path) + "|" + keyPart(line);
           const seen = best.get(key);
           if (seen === undefined || total(row) > total(seen[2])) best.set(key, [model, month, row]);
+          if (replies !== null && truthy(id)) {
+            let r = replies.get(key);
+            if (r === undefined) {
+              r = [sentAt(lines, get(d, "parentUuid"), previous), NaN, -1];
+              replies.set(key, r);
+            }
+            const ms = msOf(d);
+            if (row[1] >= r[2] && Number.isFinite(ms)) {
+              r[1] = ms;
+              r[2] = row[1];
+            }
+          }
         }
       } finally {
         fs.closeSync(fd);
+      }
+      if (replies !== null) {
+        for (const [key, r] of replies) {
+          const seen = timing.get(key);
+          if (seen === undefined || r[2] > seen[2] || (r[2] === seen[2] && r[1] < seen[1])) timing.set(key, r);
+        }
       }
     }
   }

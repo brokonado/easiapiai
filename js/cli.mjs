@@ -50,13 +50,14 @@ right of reply for the seller before anything negative is published. See https:/
 `;
 
 const SHARE_HELP = `\
-Report your LLM API spend to easiapiai.com, as numbers only, so sellers can be held to account: how much people
-really use each one and how often requests fail.
+Report your LLM API usage to easiapiai.com, as numbers only, so it can show each seller's real speed and how
+often its requests fail.
 
 What is read (on this computer): Claude Code logs, Codex logs, opencode and Cline data when present, and the
 OpenRouter activity report when OPENROUTER_MANAGEMENT_KEY is set (that key is sent only to openrouter.ai).
 What is sent, after the table is shown and you agree: per seller, model and month of the last 13 months, token,
-request and error counts, and a random contributor id kept in ~/.config/easiapiai/contributor_id (sending again
+request and error counts, the median speed in output tokens per second where the source records it (Claude Code,
+opencode, Kilo Code), and a random contributor id kept in ~/.config/easiapiai/contributor_id (sending again
 replaces your earlier numbers instead of adding to them).
 Never sent: prompts, replies, code, file names, project names, keys.
 `;

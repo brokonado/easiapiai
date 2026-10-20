@@ -44,15 +44,18 @@ function apiError(statusCode) {
 }
 
 // an assistant message as opencode stores it in message.data (packages/schema/src/v1/session.ts Assistant)
+// (by default it took 1 s and finished with "stop", so a reply of 50+ output tokens is timed for speed)
 function asst(provider, model, created, { input = 0, output = 0, reasoning = 0, read = 0, write: cw = 0, total,
-  cost = 0, error } = {}) {
+  cost = 0, error, completed = created + 1000, finish = "stop" } = {}) {
   const tokens = { input, output, reasoning, cache: { read, write: cw } };
   if (total !== undefined) tokens.total = total;
+  const time = { created };
+  if (completed !== null) time.completed = completed;
   const m = {
     role: "assistant", parentID: "msg_parent", modelID: model, providerID: provider, mode: "build", agent: "build",
-    path: { cwd: `/home/u/${SECRET}`, root: `/home/u/${SECRET}` }, time: { created, completed: created + 1000 },
-    cost, tokens, finish: "stop",
+    path: { cwd: `/home/u/${SECRET}`, root: `/home/u/${SECRET}` }, time, cost, tokens,
   };
+  if (finish !== null) m.finish = finish;
   if (error) m.error = error;
   return m;
 }
@@ -117,6 +120,25 @@ const KILO = [
   ["msg_202", asst("openrouter", "x-ai/grok-code-fast-1", OCT, { input: 30, output: 3, cost: 0.2 })],
 ];
 
+// Speed: only "stop" replies without an error, with both times, 50+ output tokens (reasoning included), 0.5 s or
+// more and at most 5000 tokens per second. Counted here: 100 in 2 s (50/s) and 40 + 20 reasoning in 0.5 s (120/s).
+const SPEED = [
+  ["msg_s01", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 100, completed: OCT + 2000 })],
+  ["msg_s02", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 500, finish: "tool-calls" })], // tools ran
+  ["msg_s03", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 100,
+    error: { name: "MessageAbortedError", data: { message: "aborted" } } })],
+  ["msg_s04", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 100, finish: null })], // opencode < 1.1
+  ["msg_s05", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 100, completed: null })], // not finished
+  ["msg_s06", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 40, reasoning: 20, completed: OCT + 500 })],
+  ["msg_s07", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 49 })], // under 50 tokens
+  ["msg_s08", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 100, completed: OCT + 400 })], // under 0.5 s
+  ["msg_s09", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 6000 })], // 6000/s: a broken timestamp
+  ["msg_s10", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 100, finish: "length" })],
+  ["msg_s11", asst("deepseek", "deepseek-chat", OCT, { input: 1, output: 100, completed: OCT - 5000 })], // backwards
+];
+const SPEED_ROW = { seller: "DeepSeek", model: "deepseek-chat", month: "2026-10", input_tokens: 11,
+  output_tokens: 7309, cached_input_tokens: 0, requests: 11, tps_median: 85, tps_n: 2 };
+
 function legacyMessages(dir) {
   const d = path.join(dir, "storage", "message", "ses_old");
   write(path.join(d, "msg_001.json"), { id: "msg_001", sessionID: "ses_old", ...OC_MAIN[0][1] }); // imported: skip
@@ -129,13 +151,13 @@ function legacyMessages(dir) {
 const OC_EXPECTED = [
   { seller: "Anthropic", model: "claude-sonnet-4-5", month: "2026-09", input_tokens: 306, output_tokens: 56,
     cached_input_tokens: 1000, requests: 3, errors: { rate_limit: 1, overloaded: 1, server: 1, auth: 2, other: 2 },
-    cost_usd: 0.012 },
+    cost_usd: 0.012, tps_median: 50, tps_n: 1 },
   { seller: "DeepSeek", model: "deepseek-chat", month: "2026-10", input_tokens: 11, output_tokens: 1,
     cached_input_tokens: 5, requests: 2 },
   { seller: "Google AI Studio", model: "gemini-2.5-pro", month: "2026-10", input_tokens: 7, output_tokens: 3,
     cached_input_tokens: 0, requests: 1, cost_usd: 0.5 },
   { seller: "OpenAI", model: "gpt-5", month: "2026-09", input_tokens: 160, output_tokens: 215,
-    cached_input_tokens: 0, requests: 3, cost_usd: 0.09 },
+    cached_input_tokens: 0, requests: 3, cost_usd: 0.09, tps_median: 100, tps_n: 2 }, // msg_004 has 15 tokens: not timed
   { seller: "OpenRouter", model: "x-ai/grok-code-fast-1", month: "2026-10", input_tokens: 30, output_tokens: 3,
     cached_input_tokens: 0, requests: 1, cost_usd: 0.2 },
   { seller: "kilo", model: "anthropic/claude-sonnet-4.5", month: "2026-10", input_tokens: 20, output_tokens: 2,
@@ -267,7 +289,7 @@ const CLINE_EXPECTED = [
 
 const TOP_KEYS = new Set(["name", "found", "rows", "note"]);
 const ROW_KEYS = new Set(["seller", "model", "month", "input_tokens", "output_tokens", "cached_input_tokens",
-  "requests", "errors", "cost_usd"]);
+  "requests", "errors", "cost_usd", "tps_median", "tps_n"]);
 const ERROR_KEYS = new Set(["rate_limit", "overloaded", "server", "auth", "other"]);
 
 function assertPrivate(res) {
@@ -282,6 +304,8 @@ function assertPrivate(res) {
           assert.ok(Number.isInteger(n) && n >= 0);
         }
       } else if (k === "cost_usd") assert.ok(typeof v === "number" && Number.isFinite(v) && v >= 0);
+      else if (k === "tps_median") assert.ok(typeof v === "number" && v > 0 && v <= 5000 && "tps_n" in row);
+      else if (k === "tps_n") assert.ok(Number.isInteger(v) && v >= 1 && "tps_median" in row);
       else if (["seller", "model", "month"].includes(k)) assert.equal(typeof v, "string");
       else assert.ok(Number.isInteger(v) && v >= 0, `${k} must be a whole number`);
     }
@@ -388,7 +412,8 @@ describe("opencode / Kilo reader", () => {
     assert.equal(res.note, null);
     // msg_001 and msg_301 in each folder: ids are shared across both folders, so each counts once
     assert.deepEqual(res.rows, [{ seller: "Anthropic", model: "claude-sonnet-4-5", month: "2026-09",
-      input_tokens: 301, output_tokens: 51, cached_input_tokens: 1000, requests: 2, cost_usd: 0.011 }]);
+      input_tokens: 301, output_tokens: 51, cached_input_tokens: 1000, requests: 2, cost_usd: 0.011,
+      tps_median: 50, tps_n: 1 }]);
     assertPrivate(res);
   });
 
@@ -399,6 +424,36 @@ describe("opencode / Kilo reader", () => {
       { input: 1, output: 1, cost: 0.001 }));
     assert.deepEqual((await opencode.read(ctx(home))).rows.map((r) => r.month), ["2026-10"]);
     assert.deepEqual((await opencode.read(ctx(home, { months: ["2026-09"] }))).rows, []);
+  });
+
+  it("times only finished replies without tool calls: median and count per row (old JSON files, any Node.js)",
+    async () => {
+      const d = path.join(home, ".local", "share", "opencode", "storage", "message", "ses_speed");
+      for (const [id, m] of SPEED) write(path.join(d, `${id}.json`), { id, sessionID: "ses_speed", ...m });
+      const res = await opencode.read(ctx(home));
+      assert.deepEqual(res.rows, [SPEED_ROW]);
+      assertPrivate(res);
+    });
+
+  it("times replies from the database the same way", async (t) => {
+    if (!HAS_SQLITE) {
+      t.skip("needs node:sqlite (Node 22.13+)");
+      return;
+    }
+    makeDb(path.join(home, ".local", "share", "kilo", "kilo.db"), SPEED);
+    const res = await opencode.read(ctx(home));
+    assert.deepEqual(res.rows, [SPEED_ROW]);
+    assertPrivate(res);
+  });
+
+  it("messageTps: stop only, no error, both times", () => {
+    const base = { output: 100, created: 1000, completed: 3000, finish: "stop", hasError: false };
+    assert.equal(opencode.messageTps(base), 50);
+    assert.equal(opencode.messageTps({ ...base, finish: "tool-calls" }), null);
+    assert.equal(opencode.messageTps({ ...base, finish: undefined }), null);
+    assert.equal(opencode.messageTps({ ...base, hasError: true }), null);
+    assert.equal(opencode.messageTps({ ...base, completed: null }), null);
+    assert.equal(opencode.messageTps({ ...base, created: "1000" }), null);
   });
 
   it("classifies errors and counts reasoning once", () => {
@@ -443,6 +498,7 @@ describe("Cline reader", () => {
     assert.equal(res.found, true);
     assert.equal(res.note, null);
     assert.deepEqual(res.rows, CLINE_EXPECTED);
+    assert.ok(res.rows.every((r) => !("tps_median" in r) && !("tps_n" in r)), "Cline sends no speed");
     assertPrivate(res);
   });
 

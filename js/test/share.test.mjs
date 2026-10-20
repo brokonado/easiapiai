@@ -5,11 +5,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { errorKind } from "../claude_code.mjs";
+import { errorKind, readLines } from "../claude_code.mjs";
 import * as claudeReader from "../readers/claude_code.mjs";
 import * as codexReader from "../readers/codex.mjs";
 import { collect, lastMonths } from "../readers/index.mjs";
 import * as openrouter from "../readers/openrouter.mjs";
+import { combine, median, replyTps, summarize, validSpeed } from "../readers/speed.mjs";
+import { printTable } from "../share.mjs";
 import { FakeServer, ccLine, runCli, tempEnv, writeJsonl } from "./helpers.mjs";
 
 const NOW = new Date();
@@ -47,6 +49,43 @@ function claudeErrorsFixture(home) {
     ccLine("m4", "r4", "claude-sonnet-4-5", at(1), { inp: 1, out: 1, legacyCw: 3 }), errLine("u1", at(0), "rate_limit")]);
 }
 
+// Claude Code speed: lines with uuid, parentUuid and timestamps (seconds after the 15th of this month, 12:00)
+const BASE = new Date(NOW.getFullYear(), NOW.getMonth(), 15, 12).getTime();
+const T = (sec) => new Date(BASE + sec * 1000).toISOString();
+const SPEED_MODEL = "claude-sonnet-4-5";
+const other = (type, uuid, sec, parentUuid = null, extra = {}) => ({ type, uuid, parentUuid, timestamp: T(sec),
+  sessionId: "s-1", ...extra });
+const user = (uuid, sec, parent = null) => other("user", uuid, sec, parent,
+  { message: { role: "user", content: "SECRET prompt" } });
+const reply = (mid, uuid, parent, sec, out) => ({ ...ccLine(mid, "r-" + mid, SPEED_MODEL, T(sec), { inp: 1, out }), uuid,
+  parentUuid: parent });
+
+function claudeSpeedFixture(home) {
+  const proj = path.join(home, ".claude", "projects", "speed");
+  writeJsonl(path.join(proj, "a.jsonl"), [
+    user("u1", 0),
+    // A: three lines, output grows; ends at the last line: 200 tokens in 5 s = 40/s
+    reply("A", "a1", "u1", 1, 10), reply("A", "a2", "a1", 3, 10), reply("A", "a3", "a2", 5, 200),
+    // B answers tool results through two attachment lines; a queued message carries the earlier time it was typed.
+    // Sent = the latest of them (10); ends at its LAST line of the largest output (15): 300 in 5 s = 60/s
+    user("t1", 9, "a3"), other("attachment", "att1", 10, "t1", { attachment: { type: "todo_reminder" } }),
+    other("attachment", "att2", -30, "att1", { attachment: { type: "queued_command", prompt: "SECRET" } }),
+    reply("B", "b1", "att2", 12, 300), reply("B", "b2", "b1", 15, 300),
+    // C: its parent is not in the file: the previous user/attachment/system line (20), not the queue line (21)
+    other("system", "s1", 20, "b2"), other("queue-operation", "q1", 21),
+    reply("C", "c1", "gone", 25, 100), // 100 in 5 s = 20/s
+    user("u2", 30, "c1"), reply("D", "d1", "u2", 31, 49), // under 50 tokens
+    user("u3", 40, "d1"), reply("E", "e1", "u3", 40.4, 100), // under 0.5 s
+    user("u4", 50, "e1"), reply("F", "f1", "u4", 50.5, 3000), // 6000/s: a broken timestamp
+    user("u5", 60, "f1"), reply("G", "g1", "u5", 60.5, 2500), // exactly 5000/s and 0.5 s: counted
+    user("u6", 70, "g1"), reply("H", "h1", "u6", 71, 50), // exactly 50 tokens: 50/s, counted
+    '{"type": "user", "broken',
+  ]);
+  // A again in another file (a resumed session), same output, later times: the copy that finished first is kept
+  writeJsonl(path.join(home, ".claude", "projects", "speed-copy", "b.jsonl"), [user("u9", 100),
+    reply("A", "a1", "u9", 400, 200)]);
+}
+
 describe("Claude Code reader", () => {
   let t;
   beforeEach(() => {
@@ -79,12 +118,95 @@ describe("Claude Code reader", () => {
     assert.match(res.note, /ANTHROPIC_BASE_URL/);
   });
 
+  it("sends no speed when the lines carry no request time", async () => {
+    const res = await claudeReader.read(ctxFor(t.home));
+    assert.ok(res.rows.every((r) => !("tps_median" in r) && !("tps_n" in r)));
+  });
+
   it("credits other models to the host of ANTHROPIC_BASE_URL", async () => {
     const res = await claudeReader.read(ctxFor(t.home, { ANTHROPIC_BASE_URL: "https://API.Z.ai/api/anthropic" }));
     const glm = res.rows.find((r) => r.model === "glm-4.6");
     assert.deepEqual(glm, { seller: "api.z.ai", model: "glm-4.6", month: THIS, input_tokens: 1, output_tokens: 2,
       cached_input_tokens: 0, requests: 1, errors: { auth: 1, other: 1 } });
     assert.equal(res.rows.find((r) => r.model === "claude-sonnet-4-5" && r.month === THIS).seller, "Anthropic");
+  });
+});
+
+describe("Claude Code speed", () => {
+  let t;
+  beforeEach(() => {
+    t = tempEnv();
+    claudeSpeedFixture(t.home);
+  });
+  afterEach(() => t.cleanup());
+
+  it("times each reply from the line it answers to its last line", () => {
+    const timing = new Map();
+    readLines([path.join(t.home, ".claude", "projects")], null, timing);
+    const tps = (mid) => {
+      const r = timing.get(`s${JSON.stringify(mid)}|s${JSON.stringify("r-" + mid)}`);
+      return replyTps(r[2], (r[1] - r[0]) / 1000);
+    };
+    assert.deepEqual(["A", "B", "C", "D", "E", "F", "G", "H"].map(tps), [40, 60, 20, null, null, null, 5000, 50]);
+  });
+
+  it("keeps the copy of a reply that finished first, whichever folder is read first", () => {
+    const a = path.join(t.home, ".claude", "projects", "speed");
+    const b = path.join(t.home, ".claude", "projects", "speed-copy");
+    const key = `s${JSON.stringify("A")}|s${JSON.stringify("r-A")}`;
+    for (const dirs of [[a, b], [b, a]]) {
+      const timing = new Map();
+      readLines(dirs, null, timing);
+      const r = timing.get(key);
+      assert.equal(replyTps(r[2], (r[1] - r[0]) / 1000), 40);
+    }
+  });
+
+  it("a row carries the median and the number of replies counted", async () => {
+    const res = await claudeReader.read(ctxFor(t.home));
+    assert.deepEqual(res.rows, [{ seller: "Anthropic", model: SPEED_MODEL, month: THIS, input_tokens: 8,
+      output_tokens: 6299, cached_input_tokens: 0, requests: 8, tps_median: 50, tps_n: 5 }]); // 20 40 50 60 5000
+  });
+
+  it("bill reads the same tokens with or without timing", () => {
+    const dirs = [path.join(t.home, ".claude", "projects")];
+    assert.deepEqual([...readLines(dirs)[0]], [...readLines(dirs, null, new Map())[0]]);
+  });
+});
+
+describe("speed rules", () => {
+  it("counts a reply with 50+ output tokens, 0.5 s or more, at most 5000 per second", () => {
+    assert.equal(replyTps(50, 1), 50);
+    assert.equal(replyTps(49, 1), null);
+    assert.equal(replyTps(100, 0.5), 200);
+    assert.equal(replyTps(100, 0.49), null);
+    assert.equal(replyTps(5000, 1), 5000);
+    assert.equal(replyTps(5001, 1), null);
+    assert.equal(replyTps(100, -3), null);
+    assert.equal(replyTps(100, NaN), null);
+    assert.equal(replyTps("100", 1), null);
+  });
+
+  it("median, summary and validity", () => {
+    assert.equal(median([3, 1, 2]), 2);
+    assert.equal(median([4, 1, 3, 2]), 2.5);
+    assert.equal(summarize([]), null);
+    assert.deepEqual(summarize([10, 20.04, 30]), { tps_median: 20, tps_n: 3 });
+    assert.deepEqual(summarize([10.04, 20.11]), { tps_median: 15.1, tps_n: 2 });
+    assert.equal(summarize([0.01]), null); // rounds to 0: not sendable
+    assert.ok(validSpeed(5000, 1e9));
+    for (const [m, n] of [[0, 1], [5000.1, 1], [-1, 1], [NaN, 1], ["50", 1], [50, 0], [50, 1.5], [50, 1e9 + 1],
+      [50, undefined], [undefined, 3]]) {
+      assert.equal(validSpeed(m, n), false, `${m} ${n}`);
+    }
+  });
+
+  it("combines two rows' speeds weighted by reply counts", () => {
+    assert.deepEqual(combine({ tps_median: 50, tps_n: 2 }, { tps_median: 81, tps_n: 1 }),
+      { tps_median: 60.3, tps_n: 3 });
+    assert.deepEqual(combine({ tps_median: 50, tps_n: 2 }, {}), { tps_median: 50, tps_n: 2 });
+    assert.deepEqual(combine({}, { tps_median: 70, tps_n: 4 }), { tps_median: 70, tps_n: 4 });
+    assert.equal(combine({}, {}), null);
   });
 });
 
@@ -186,6 +308,25 @@ describe("collect", () => {
       cached_input_tokens: 0, requests: 3, errors: { rate_limit: 3, server: 1 }, source: "logs" }]);
   });
 
+  it("merges speed as the reply-weighted mean of the medians, and sends it only as a valid pair", async () => {
+    const { rows } = await collect(ctxFor("/x"), [
+      reader("A", [row("Anthropic", "claude-x", { tps_median: 50, tps_n: 2 }), row("Anthropic", "claude-y"),
+        row("Anthropic", "claude-z", { tps_median: 40, tps_n: 3 })]),
+      reader("B", [row("Anthropic", "claude-x", { tps_median: 81, tps_n: 1 }),
+        row("Anthropic", "claude-y", { tps_median: 70, tps_n: 4 }),
+        row("Anthropic", "claude-z", { tps_median: 0, tps_n: 9 })]), // invalid: dropped, A's speed kept
+    ]);
+    assert.deepEqual(rows.map((r) => [r.model, r.tps_median, r.tps_n]),
+      [["claude-x", 60.3, 3], ["claude-y", 70, 4], ["claude-z", 40, 3]]);
+    const bad = [{ tps_median: 5001, tps_n: 1 }, { tps_median: 50, tps_n: 0 }, { tps_median: 50, tps_n: 2.5 },
+      { tps_median: 50 }, { tps_n: 5 }, { tps_median: "50", tps_n: 1 }, { tps_median: 50, tps_n: 1e10 }];
+    const cleaned = await collect(ctxFor("/x"), [reader("C", bad.map((b, i) => row("S", `m${i}`, b)))]);
+    assert.equal(cleaned.rows.length, bad.length);
+    assert.ok(cleaned.rows.every((r) => !("tps_median" in r) && !("tps_n" in r)));
+    const edge = await collect(ctxFor("/x"), [reader("D", [row("S", "m", { tps_median: 5000, tps_n: 1e9 })])]);
+    assert.deepEqual([edge.rows[0].tps_median, edge.rows[0].tps_n], [5000, 1e9]);
+  });
+
   it("leaves out a tool's OpenRouter rows when the activity report covers them", async () => {
     const { rows } = await collect(ctxFor("/x"), [
       reader("Cline", [row("OpenRouter", "a/m"), row("OpenRouter", "a/other")]),
@@ -199,6 +340,40 @@ describe("collect", () => {
     const { sources, rows } = await collect(ctxFor("/x"), [{ NAME: "Broken", read: async () => { throw new Error("x"); } }]);
     assert.deepEqual([sources[0].found, rows], [false, []]);
     assert.match(sources[0].note, /could not be read/);
+  });
+});
+
+describe("share table", () => {
+  const capture = (fn) => {
+    const write = process.stdout.write;
+    let out = "";
+    process.stdout.write = (chunk) => {
+      out += chunk;
+      return true;
+    };
+    try {
+      fn();
+    } finally {
+      process.stdout.write = write;
+    }
+    return out;
+  };
+  const base = { model: "m", month: "2026-10", input_tokens: 1000, output_tokens: 20, cached_input_tokens: 0,
+    requests: 2 };
+
+  it("adds a tok/s column when a row has speed, empty for rows without it and for the total", () => {
+    const rows = [{ seller: "A", ...base, tps_median: 64.25, tps_n: 9 }, { seller: "B", ...base }];
+    const out = capture(() => printTable(rows)).split("\n");
+    assert.match(out[0], /Errors +tok\/s$/);
+    assert.match(out[1], /^ +A +m +2026-10 +1,000 +20 +0 +2 +0 +64\.3$/);
+    assert.match(out[2], /^ +B +m +2026-10 +1,000 +20 +0 +2 +0$/);
+    assert.match(out[4], /^ +Total +2,000 +40 +0 +4 +0$/);
+  });
+
+  it("has no speed column when no row has speed", () => {
+    const out = capture(() => printTable([{ seller: "A", ...base }]));
+    assert.ok(!out.includes("tok/s"));
+    assert.match(out.split("\n")[0], /Errors$/);
   });
 });
 
@@ -238,6 +413,19 @@ describe("share and sharing", () => {
     r = await runCli(["share", "--api", api.url], t.env);
     assert.equal(r.code, 0);
     assert.match(r.out, /Nothing was sent\. To send these numbers to 127\.0\.0\.1, run again with --yes/);
+    assert.deepEqual(api.requests, []);
+  });
+
+  it("shows and sends the speed of timed replies", async () => {
+    claudeSpeedFixture(t.home);
+    const r = await runCli(["share", "--dry-run", "--api", api.url], t.env);
+    assert.equal(r.code, 0);
+    assert.match(r.out,
+      /\ntok\/s: the median output tokens per second of a reply, from the request to its last token\.\n/);
+    assert.match(r.out, /claude-sonnet-4-5 +\d{4}-\d{2} .* 50\.0\n/);
+    const { out } = await runCli(["share", "--json", "--api", api.url], t.env);
+    const sent = JSON.parse(out)[0].rows.find((x) => x.model === "claude-sonnet-4-5" && x.month === THIS);
+    assert.deepEqual([sent.tps_median, sent.tps_n], [50, 5]);
     assert.deepEqual(api.requests, []);
   });
 
@@ -309,6 +497,8 @@ describe("plugin hooks", () => {
     let r = await start();
     assert.equal(r.code, 0);
     assert.match(r.out, /^easiapiai plugin: the user has not decided about usage reporting yet\./);
+    assert.match(r.out, /"easiapiai shows how LLM API sellers actually perform: speed, failed requests and real cost, /);
+    assert.match(r.out, /token, error and speed numbers per seller and month, never your key, prompts or code\. Add /);
     assert.match(r.out, /run `node ".*easiapiai\.mjs" sharing on`; if no, run `node ".*easiapiai\.mjs" sharing off`/);
     assert.equal(r.out.trim().split("\n").length, 1);
     assert.equal(state().asked, 1);

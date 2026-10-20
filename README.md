@@ -1,15 +1,12 @@
 # easiapiai
 
-**Keep LLM API sellers accountable**
+**How LLM API sellers actually perform**
 
-Sellers publish their prices, and nobody publishes what happens after you pay: how much people really spend with
-each one and how often their requests fail. Each of us sees only our own dashboard. If enough people put their
-numbers in one public place, every seller's record is there for anyone to check before they pay.
+Speed, failed requests and what people really pay at each seller, from real usage. Add yours with one line to your
+coding agent; it never sends your key or prompts.
 
 It also prices your own usage at every seller of the same model, from [easiapiai.com](https://easiapiai.com)'s
 price list (90+ sellers, updated every 6 hours).
-
-![The share page on easiapiai.com](docs/img/share.png)
 
 ## Install
 
@@ -22,8 +19,6 @@ price list (90+ sellers, updated every 6 hours).
 Next time you start Claude Code it asks once whether to report your numbers. Say yes and it reports about
 once a week in the background; say no and it never asks again.
 
-![Claude Code asking once](docs/img/ask.png)
-
 **Any terminal** (Node 18+):
 
 ```
@@ -32,13 +27,11 @@ npx github:brokonado/easiapiai share
 
 **VS Code, Cursor, Claude desktop:** one-click buttons on [easiapiai.com/install](https://easiapiai.com/install).
 
-<img src="docs/img/install.png" alt="The install page" width="560">
-
 ## What you can ask
 
 | Type in Claude Code | What happens |
 |---|---|
-| `/easiapiai:share` | reports your token and error counts per seller (shows them to you first) |
+| `/easiapiai:share` | reports your token, error and speed numbers per seller (shows them to you first) |
 | `/easiapiai:bill` | prices your Claude Code / Codex usage at every seller of the same model |
 | "cheapest seller for DeepSeek V4 Flash?" | looks it up in easiapiai's price list |
 
@@ -50,6 +43,7 @@ npx github:brokonado/easiapiai share
 | month | prompts and replies |
 | token counts (input, output, cached) | code, file names, project names |
 | number of requests and errors | anything else |
+| speed (tokens per second) | |
 
 Nothing appears on easiapiai.com until 3 different people have shared the same provider, and totals are rounded, so
 no one's own numbers can be read off the site. Turn automatic reporting off any time:
@@ -60,7 +54,8 @@ no one's own numbers can be read off the site. Turn automatic reporting off any 
 Everything is read on your computer:
 
 - the logs that **Claude Code**, **Codex**, **opencode**, **Kilo Code** and **Cline** already keep (token counts,
-  errors, and which provider and model);
+  errors, and which provider and model; speed comes from the reply times that Claude Code, opencode and Kilo Code
+  record);
 - **OpenRouter**'s usage report, if you set `OPENROUTER_MANAGEMENT_KEY` (it says which provider served each model);
 - anything you type in at [easiapiai.com/share](https://easiapiai.com/share).
 
