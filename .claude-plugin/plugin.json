@@ -1,7 +1,7 @@
 {
   "name": "easiapiai",
   "version": "0.2.0",
-  "description": "Share which LLM API sellers you use and how much (numbers only, never your key), price your real Claude Code / Codex usage at every seller, and look up LLM API prices across 90+ sellers. Open, human + agent maintained: easiapiai.com",
+  "description": "Keep LLM API sellers accountable: report your spend per seller (token and error counts, never your key), price your Claude Code / Codex usage at every seller, and look up LLM API prices across 90+ sellers. easiapiai.com",
   "author": {
     "name": "easiapiai"
   },

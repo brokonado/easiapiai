@@ -50,8 +50,8 @@ right of reply for the seller before anything negative is published. See https:/
 `;
 
 const SHARE_HELP = `\
-Share your LLM API usage with easiapiai.com, as numbers only, to show which sellers people really use and how
-they hold up.
+Report your LLM API spend to easiapiai.com, as numbers only, so sellers can be held to account: how much people
+really use each one and how often requests fail.
 
 What is read (on this computer): Claude Code logs, Codex logs, opencode and Cline data when present, and the
 OpenRouter activity report when OPENROUTER_MANAGEMENT_KEY is set (that key is sent only to openrouter.ai).
@@ -265,7 +265,7 @@ export function buildParser() {
       + "provider-accountability project. https://easiapiai.com",
     epilog: "Commands:\n  bill     price your real usage (Claude Code, Codex) at every seller of the same model\n"
       + "  test     help check what a provider actually serves, with your own key\n"
-      + "  share    share your usage numbers with easiapiai (shows them and asks first)\n"
+      + "  share    report your usage numbers to easiapiai (shows them and asks first)\n"
       + "  sharing  turn automatic weekly sharing on or off (it runs from the Claude Code plugin)\n\n"
       + "Run 'easiapiai <command> --help' for what each one reads and sends.",
   });
@@ -301,7 +301,7 @@ export function buildParser() {
     help: "per-request timeout (default: 60)" });
   t.setDefaults({ func: (args) => testRunner.run(args) });
 
-  const s = sub.addParser("share", { help: "share your usage numbers with easiapiai (shows them and asks first)",
+  const s = sub.addParser("share", { help: "report your usage numbers to easiapiai (shows them and asks first)",
     description: SHARE_HELP });
   s.addArgument(["--dry-run"], { kind: "store_true", help: "print the sources and the table only; send nothing" });
   s.addArgument(["--json"], { kind: "store_true",
@@ -311,14 +311,14 @@ export function buildParser() {
   s.setDefaults({ func: share.cmdShare });
 
   const sh = sub.addParser("sharing", { help: "turn automatic weekly sharing on or off",
-    description: "Automatic sharing: the easiapiai Claude Code plugin sends the numbers 'easiapiai share' shows "
+    description: "Automatic reporting: the easiapiai Claude Code plugin sends the numbers 'easiapiai share' shows "
       + "about once a week, once you turn it on. The setting is kept in ~/.config/easiapiai/sharing.json." });
   sh.setDefaults({ func: () => {
     process.stdout.write(sh.formatHelp());
     return 2;
   } });
   const actions = sh.addSubparsers({ dest: "sharing_action", metavar: "{on,off,status}" });
-  const on = actions.addParser("on", { help: "share automatically from now on, and send now" });
+  const on = actions.addParser("on", { help: "report automatically from now on, and send now" });
   on.addArgument(["--no-send"], { kind: "store_true", help: "only record the choice; send nothing now" });
   on.addArgument(["--api"], { metavar: "URL", default: API, help: apiHelp });
   on.setDefaults({ func: share.cmdSharing });

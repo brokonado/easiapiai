@@ -1,8 +1,10 @@
 # easiapiai
 
-**Which LLM API sellers do people actually use, and how well do they hold up?**
-easiapiai answers that with real usage from real people: which providers and models they use, how many tokens,
-how many errors. Numbers only: never your key, your prompts or your code.
+**Keep LLM API sellers accountable**
+
+Sellers publish their prices, and nobody publishes what happens after you pay: how much people really spend with
+each one and how often their requests fail. Each of us sees only our own dashboard. If enough people put their
+numbers in one public place, every seller's record is there for anyone to check before they pay.
 
 It also prices your own usage at every seller of the same model, from [easiapiai.com](https://easiapiai.com)'s
 price list (90+ sellers, updated every 6 hours).
@@ -17,7 +19,7 @@ price list (90+ sellers, updated every 6 hours).
 /plugin install easiapiai --marketplace brokonado/easiapiai
 ```
 
-Next time you start Claude Code it asks once whether to share your usage numbers. Say yes and it shares about
+Next time you start Claude Code it asks once whether to report your numbers. Say yes and it reports about
 once a week in the background; say no and it never asks again.
 
 ![Claude Code asking once](docs/img/ask.png)
@@ -36,7 +38,7 @@ npx github:brokonado/easiapiai share
 
 | Type in Claude Code | What happens |
 |---|---|
-| `/easiapiai:share` | shares your usage numbers (shows them to you first) |
+| `/easiapiai:share` | reports your token and error counts per seller (shows them to you first) |
 | `/easiapiai:bill` | prices your Claude Code / Codex usage at every seller of the same model |
 | "cheapest seller for DeepSeek V4 Flash?" | looks it up in easiapiai's price list |
 
@@ -50,7 +52,7 @@ npx github:brokonado/easiapiai share
 | number of requests and errors | anything else |
 
 Nothing appears on easiapiai.com until 3 different people have shared the same provider, and totals are rounded, so
-no one's own numbers can be read off the site. Turn automatic sharing off any time:
+no one's own numbers can be read off the site. Turn automatic reporting off any time:
 `npx github:brokonado/easiapiai sharing off` (or ask Claude Code to turn it off).
 
 ## Where the numbers come from

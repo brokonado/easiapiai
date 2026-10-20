@@ -2,7 +2,7 @@
 
 The short version is in the [README](../README.md). This page has the exact rules.
 
-## `easiapiai share`: share your usage numbers (Node 18+)
+## `easiapiai share`: report your usage numbers (Node 18+)
 
 ```
 npx github:brokonado/easiapiai share            # show the numbers, then ask before sending

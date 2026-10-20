@@ -261,11 +261,11 @@ describe("share and sharing", () => {
   it("sharing on / status / off keep the choice in sharing.json", async () => {
     let r = await runCli(["sharing", "on", "--no-send", "--api", api.url], t.env);
     assert.equal(r.code, 0);
-    assert.match(r.out, /Automatic sharing is on: .*once a week.*sharing off/);
+    assert.match(r.out, /Automatic reporting is on: .*once a week.*sharing off/);
     let state = JSON.parse(fs.readFileSync(path.join(cfg(), "sharing.json"), "utf-8"));
     assert.deepEqual([state.auto, state.last_sent], [true, null]);
     r = await runCli(["sharing", "status"], t.env);
-    assert.match(r.out, /Automatic sharing: on .*\nLast sent: never\./);
+    assert.match(r.out, /Automatic reporting: on .*\nLast sent: never\./);
     r = await runCli(["sharing", "off"], t.env);
     state = JSON.parse(fs.readFileSync(path.join(cfg(), "sharing.json"), "utf-8"));
     assert.equal(state.auto, false);
@@ -308,7 +308,7 @@ describe("plugin hooks", () => {
   it("session-start asks at most 3 times, 3 days apart, and never once decided", async () => {
     let r = await start();
     assert.equal(r.code, 0);
-    assert.match(r.out, /^easiapiai plugin: the user has not decided about usage sharing yet\./);
+    assert.match(r.out, /^easiapiai plugin: the user has not decided about usage reporting yet\./);
     assert.match(r.out, /run `node ".*easiapiai\.mjs" sharing on`; if no, run `node ".*easiapiai\.mjs" sharing off`/);
     assert.equal(r.out.trim().split("\n").length, 1);
     assert.equal(state().asked, 1);

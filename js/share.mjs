@@ -17,10 +17,11 @@ const WEEK = 7 * 86400000;
 const ASK_EVERY = 3 * 86400000;
 const ASK_TIMES = 3;
 
-const QUESTION = "easiapiai plugin: the user has not decided about usage sharing yet. Ask them once, briefly, at the "
-  + "start of your first reply (or at the end if they asked for urgent work): \"easiapiai can share your LLM API "
-  + "usage numbers automatically, about once a week: which providers and models you use, token counts, and how many "
-  + "requests and errors. Never prompts, code, file names or keys. Share automatically? (yes/no)\". If they say yes, "
+const QUESTION = "easiapiai plugin: the user has not decided about usage reporting yet. Ask them once, briefly, at the "
+  + "start of your first reply (or at the end if they asked for urgent work): \"easiapiai keeps LLM API sellers "
+  + "accountable by putting what people spend with each one in one public place. It can report yours automatically, "
+  + "about once a week: token and error counts per seller and month, never your key, prompts or code. Report "
+  + "automatically? (yes/no)\". If they say yes, "
   + "run `<CMD> sharing on`; if no, run `<CMD> sharing off`. Then do not mention it again.";
 
 function print(s = "") {
@@ -189,7 +190,7 @@ export async function cmdSharing(args) {
   const cmd = selfCommand();
   if (args.sharing_action === "status") {
     const setting = state.auto === true ? "on" : state.auto === false ? "off" : "not decided yet";
-    print(`Automatic sharing: ${setting}${state.decided_at ? ` (since ${state.decided_at})` : ""}.`);
+    print(`Automatic reporting: ${setting}${state.decided_at ? ` (since ${state.decided_at})` : ""}.`);
     print(`Last sent: ${state.last_sent ?? "never"}.`);
     print(`Setting kept in ${joinPath(configDir(), "sharing.json")}`);
     return 0;
@@ -198,10 +199,10 @@ export async function cmdSharing(args) {
   state.decided_at = new Date().toISOString();
   saveSharing(state);
   if (!state.auto) {
-    print(`Automatic sharing is off: nothing will be sent. Turn it on any time with: ${cmd} sharing on`);
+    print(`Automatic reporting is off: nothing will be sent. Turn it on any time with: ${cmd} sharing on`);
     return 0;
   }
-  print("Automatic sharing is on: while the easiapiai Claude Code plugin is installed, it sends your usage numbers "
+  print("Automatic reporting is on: while the easiapiai Claude Code plugin is installed, it sends your usage numbers "
     + "about once a week (providers, models, token, request and error counts; never prompts, code, file names or "
     + `keys). Stop any time with: ${cmd} sharing off`);
   if (args.no_send) return 0;
