@@ -6,7 +6,11 @@ dist/
 .venv*/
 .coverage
 htmlcov/
+node_modules/
+.npm/
+*.tgz
 # never commit real usage logs or snapshots of them
 *.jsonl
 !tests/**/*.jsonl
+!js/test/**/*.jsonl
 _parity_snapshot/

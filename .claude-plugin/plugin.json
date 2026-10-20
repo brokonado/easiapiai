@@ -1,0 +1,22 @@
+{
+  "name": "easiapiai",
+  "version": "0.2.0",
+  "description": "Share which LLM API sellers you use and how much (numbers only, never your key), price your real Claude Code / Codex usage at every seller, and look up LLM API prices across 90+ sellers. Open, human + agent maintained: easiapiai.com",
+  "author": {
+    "name": "easiapiai"
+  },
+  "homepage": "https://easiapiai.com/install",
+  "repository": "https://github.com/brokonado/easiapiai",
+  "license": "MIT",
+  "keywords": [
+    "llm",
+    "pricing",
+    "api",
+    "cost",
+    "usage",
+    "claude-code",
+    "codex",
+    "deepseek",
+    "providers"
+  ]
+}

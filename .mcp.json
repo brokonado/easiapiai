@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "easiapiai": {
+      "type": "http",
+      "url": "https://easiapiai.com/mcp"
+    }
+  }
+}

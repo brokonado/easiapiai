@@ -1,0 +1,40 @@
+{
+  "name": "easiapiai",
+  "version": "0.2.0",
+  "description": "Price your real LLM token usage at every seller of the same model, and help check what LLM API providers actually serve.",
+  "type": "module",
+  "bin": {
+    "easiapiai": "js/easiapiai.mjs"
+  },
+  "files": [
+    "js/",
+    "!js/test/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test js/test/parsers.test.mjs js/test/commands.test.mjs js/test/share.test.mjs js/test/readers.test.mjs"
+  },
+  "keywords": [
+    "llm",
+    "api",
+    "pricing",
+    "claude-code",
+    "codex",
+    "openai-compatible",
+    "benchmark"
+  ],
+  "author": "easiapiai contributors",
+  "license": "MIT",
+  "homepage": "https://easiapiai.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brokonado/easiapiai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/brokonado/easiapiai/issues"
+  }
+}

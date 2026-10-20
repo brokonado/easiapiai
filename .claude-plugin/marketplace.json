@@ -1,0 +1,16 @@
+{
+  "name": "easiapiai",
+  "owner": {
+    "name": "easiapiai"
+  },
+  "metadata": {
+    "description": "easiapiai: LLM API prices at every seller, your real usage priced, and provider tests you run with your own key."
+  },
+  "plugins": [
+    {
+      "name": "easiapiai",
+      "source": "./",
+      "description": "Share which LLM API sellers you use and how much (numbers only), price your real Claude Code / Codex usage at every seller, and look up LLM API prices. Uses Node or Python, whichever you have."
+    }
+  ]
+}
