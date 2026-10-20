@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "easiapiai"
+dynamic = ["version"]
+description = "Price your real LLM token usage at every seller of the same model, and help check what LLM API providers actually serve."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "easiapiai contributors" }]
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["llm", "api", "pricing", "claude-code", "codex", "openai-compatible", "benchmark"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://easiapiai.com"
+Bill = "https://easiapiai.com/bill"
+Tests = "https://easiapiai.com/test"
+Accountability = "https://easiapiai.com/accountability"
+
+[project.scripts]
+easiapiai = "easiapiai.cli:main"
+
+[tool.hatch.version]
+path = "src/easiapiai/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/easiapiai"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/easiapiai", "tests", "README.md", "LICENSE", "CONTRIBUTING.md"]

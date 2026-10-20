@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv*/
+.coverage
+htmlcov/
+# never commit real usage logs or snapshots of them
+*.jsonl
+!tests/**/*.jsonl
+_parity_snapshot/
